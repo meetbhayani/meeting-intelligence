@@ -1,0 +1,11 @@
+.env
+*.db
+data/
+chroma_db/
+tests/
+samples/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.vscode/

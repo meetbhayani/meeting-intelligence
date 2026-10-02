@@ -1,0 +1,22 @@
+# Render Blueprint: Dashboard > New > Blueprint > select this repo.
+# You will be asked for GEMINI_API_KEY during setup (it is never stored in the repo).
+services:
+  - type: web
+    name: meeting-intelligence
+    runtime: docker
+    plan: free            # free instances sleep after 15 min idle; use "starter" to keep it always on
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: DATABASE_URL
+        fromDatabase:
+          name: meeting-db
+          property: connectionString
+
+databases:
+  - name: meeting-db
+    plan: free            # free Postgres expires after 30 days; use "basic-256mb" for a permanent DB
