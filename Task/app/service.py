@@ -48,40 +48,54 @@ class GeminiService:
             self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
         return self._client
 
-    def _generate(self, contents, response_schema=None, temperature=0.0, retries=3, delay=4):
+    def _generate(self, contents, response_schema=None, temperature=0.0, retries=4, delay=4, models=None):
         """
         Calls Gemini with exponential backoff on transient 429/5xx upstream errors.
+        If a model stays overloaded (or its quota is exhausted), falls back to the next
+        model in GEMINI_FALLBACK_MODELS. Returns (response, model_used).
         """
         config = types.GenerateContentConfig(temperature=temperature)
         if response_schema:
             config.response_mime_type = "application/json"
             config.response_schema = response_schema
 
-        for attempt in range(retries):
-            try:
-                return self.client.models.generate_content(
-                    model=settings.GEMINI_MODEL, contents=contents, config=config
-                )
-            except APIError as e:
-                if e.code not in RETRYABLE_CODES or attempt == retries - 1:
-                    raise
-                wait = _suggested_retry_seconds(e) or delay
-                if wait > MAX_RETRY_WAIT_S:
-                    raise  # daily quota exhausted: retrying only burns more requests
-                logger.warning("Gemini returned %s. Retrying %d/%d in %.0fs...", e.code, attempt + 1, retries, wait)
-                time.sleep(wait)
-                delay *= 2
+        last_error: Optional[APIError] = None
+        for model in models or settings.GEMINI_MODELS:
+            wait_s = delay
+            for attempt in range(retries):
+                try:
+                    response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                    if model != settings.GEMINI_MODEL:
+                        logger.warning("Used fallback model %s.", model)
+                    return response, model
+                except APIError as e:
+                    if e.code not in RETRYABLE_CODES:
+                        raise
+                    last_error = e
+                    suggested = _suggested_retry_seconds(e)
+                    if attempt == retries - 1 or (suggested and suggested > MAX_RETRY_WAIT_S):
+                        # Overloaded for too long, or daily quota exhausted: try the next model.
+                        logger.warning("Gemini %s returned %s; giving up on this model.", model, e.code)
+                        break
+                    wait = suggested or wait_s
+                    logger.warning("Gemini %s returned %s. Retrying %d/%d in %.0fs...", model, e.code, attempt + 1, retries, wait)
+                    time.sleep(wait)
+                    wait_s *= 2
+        raise last_error
 
-    def _generate_validated(self, contents, schema: type[BaseModel], temperature=0.0, attempts=2) -> BaseModel:
-        """Structured generation + Pydantic validation; regenerates once if the JSON is invalid."""
+    def _generate_validated(self, contents, schema: type[BaseModel], temperature=0.0, attempts=2):
+        """Structured generation + Pydantic validation; regenerates once if the JSON is invalid.
+        Returns (parsed_result, model_used)."""
         last_error: Optional[Exception] = None
+        models = settings.GEMINI_MODELS
         for _ in range(attempts):
-            response = self._generate(contents, response_schema=schema, temperature=temperature)
+            response, model = self._generate(contents, response_schema=schema, temperature=temperature, models=models)
+            models = models[models.index(model):]  # regenerate on the model that just answered, not an overloaded one
             if not response.text:
                 last_error = ValueError("Model returned an empty response.")
                 continue
             try:
-                return schema.model_validate_json(response.text)
+                return schema.model_validate_json(response.text), model
             except ValidationError as e:
                 last_error = e
                 logger.warning("Structured output failed validation, regenerating: %s", e)
@@ -120,7 +134,7 @@ class GeminiService:
                 "Transcribe this meeting audio. Accurately detect and separate speakers by their name/role "
                 "(e.g., Manager, Rahul, Priya) based on conversation headers. Output clean dialogue text lines."
             )
-            transcript_response = self._generate([audio_file_remote, transcribe_prompt])
+            transcript_response, _ = self._generate([audio_file_remote, transcribe_prompt])
             transcript_text = (transcript_response.text or "").strip()
             if not transcript_text:
                 raise ValueError("No speech could be transcribed from this audio.")
@@ -131,8 +145,8 @@ class GeminiService:
 
             # Step 2: Strict Feature Extraction against target JSON Pydantic format schema
             logger.info("[%s] Extracting structured analysis...", meeting_id)
-            analysis = self._extract(audio_file_remote, meeting.meeting_date)
-            self._complete(meeting_id, analysis)
+            analysis, model = self._extract(audio_file_remote, meeting.meeting_date)
+            self._complete(meeting_id, analysis, model)
         except Exception as e:
             self._fail(meeting_id, e)
         finally:
@@ -152,12 +166,12 @@ class GeminiService:
                 if meeting is None:
                     return
                 transcript, meeting_date = meeting.transcript, meeting.meeting_date
-            analysis = self._extract(f"MEETING TRANSCRIPT:\n{transcript}", meeting_date)
-            self._complete(meeting_id, analysis)
+            analysis, model = self._extract(f"MEETING TRANSCRIPT:\n{transcript}", meeting_date)
+            self._complete(meeting_id, analysis, model)
         except Exception as e:
             self._fail(meeting_id, e)
 
-    def _extract(self, source, meeting_date: Optional[str]) -> MeetingAnalysis:
+    def _extract(self, source, meeting_date: Optional[str]):
         extract_prompt = (
             "Analyze the meeting recording precisely. Extract exactly as structured:\n"
             "1. Summary text (Concise recap text)\n"
@@ -188,7 +202,8 @@ class GeminiService:
             f"SUMMARY STRUCTURED ANALYTICS:\n{m.analysis_json}\n\n"
             f"USER QUESTION: {question}"
         )
-        return self._generate_validated(context_payload, QueryAnswer, temperature=0.1)
+        answer, _ = self._generate_validated(context_payload, QueryAnswer, temperature=0.1)
+        return answer
 
     # ------------------------------------------------------------------
     # Persistence helpers (each uses its own short-lived session)
@@ -206,14 +221,14 @@ class GeminiService:
             db.expunge(meeting)
             return meeting
 
-    def _complete(self, meeting_id: str, analysis: MeetingAnalysis):
+    def _complete(self, meeting_id: str, analysis: MeetingAnalysis, model: str):
         self._update(
             meeting_id,
             analysis_json=analysis.model_dump_json(),
             title=analysis.title,
             status=MeetingStatus.COMPLETED,
             error_message=None,
-            model_name=settings.GEMINI_MODEL,
+            model_name=model,
         )
         logger.info("[%s] Processing completed.", meeting_id)
 
@@ -221,6 +236,8 @@ class GeminiService:
         logger.exception("[%s] Processing failed: %s", meeting_id, error)
         if isinstance(error, APIError) and error.code == 429:
             message = "Gemini API quota/rate limit exceeded. Wait for the quota to reset or use a key with billing enabled."
+        elif isinstance(error, APIError) and error.code in (500, 502, 503, 504):
+            message = "Gemini is temporarily overloaded (all configured models). Please upload again in a few minutes."
         elif isinstance(error, APIError):
             message = f"AI service error ({error.code}): {error.message or error}"
         else:

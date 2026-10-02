@@ -236,6 +236,8 @@ def query_meeting(id: str, payload: QueryRequest, db: Session = Depends(get_db))
                 status_code=429,
                 detail="Gemini API quota/rate limit exceeded. Wait for the quota to reset or use a key with billing enabled.",
             )
+        if e.code in (500, 502, 503, 504):
+            raise HTTPException(status_code=503, detail="Gemini is temporarily overloaded. Please try again in a minute.")
         raise HTTPException(status_code=502, detail=f"AI service error ({e.code}). Please retry.")
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))

@@ -16,6 +16,10 @@ def _normalize_db_url(url: str) -> str:
 class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    # Tried in order when the main model is overloaded (503) or out of quota (429).
+    GEMINI_FALLBACK_MODELS: list = [
+        m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",") if m.strip()
+    ]
     DATABASE_URL: str = _normalize_db_url(os.getenv("DATABASE_URL", "sqlite:///./data/meetings.db"))
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./data/uploads")
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "100"))
@@ -32,6 +36,10 @@ class Settings:
         ".flac": "audio/flac",
         ".webm": "audio/webm",
     }
+
+    @property
+    def GEMINI_MODELS(self) -> list:
+        return [self.GEMINI_MODEL] + [m for m in self.GEMINI_FALLBACK_MODELS if m != self.GEMINI_MODEL]
 
     @property
     def ALLOWED_EXTENSIONS(self) -> set:
