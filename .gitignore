@@ -1,0 +1,7 @@
+.vscode/
+meeting-task/
+.venv/
+.env
+*.db
+__pycache__/
+*.pyc

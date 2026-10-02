@@ -4,7 +4,9 @@ services:
   - type: web
     name: meeting-intelligence
     runtime: docker
-    plan: free            # free instances sleep after 15 min idle; use "starter" to keep it always on
+    dockerfilePath: ./Task/Dockerfile   # app lives in Task/ (paths are relative to the repo root)
+    dockerContext: ./Task
+    plan: free           # free instances sleep after 15 min idle; use "starter" to keep it always on
     healthCheckPath: /health
     autoDeploy: true
     envVars:
