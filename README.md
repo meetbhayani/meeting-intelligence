@@ -47,8 +47,10 @@ GEMINI_API_KEY=your-key docker compose up --build
 | Variable | Description | Default |
 |---|---|---|
 | `GEMINI_API_KEY` | Gemini API key (required) | – |
-| `GEMINI_MODEL` | Main model | `gemini-3.5-flash` |
-| `GEMINI_FALLBACK_MODELS` | Used when the main model is overloaded | `gemini-3.5-flash-lite` |
+| `GEMINI_TRANSCRIPTION_MODEL` | Primary model used to transcribe uploaded audio | `gemini-3.5-transcribe` |
+| `GEMINI_TRANSCRIPTION_FALLBACK_MODELS` | Models tried if transcription is overloaded | `gemini-3.5-flash-lite` |
+| `GEMINI_ANALYSIS_MODEL` | Model used for meeting analysis and current Q&A | `gemini-3.5-flash-lite` |
+| `GEMINI_FALLBACK_MODELS` | Analysis fallback if the selected model is overloaded | `gemini-3.5-flash` |
 | `DATABASE_URL` | Database connection string | `sqlite:///./data/meetings.db` |
 | `MAX_UPLOAD_MB` | Max audio file size | `100` |
 

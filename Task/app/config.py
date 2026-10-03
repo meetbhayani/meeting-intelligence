@@ -15,10 +15,16 @@ def _normalize_db_url(url: str) -> str:
 
 class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-    # Tried in order when the main model is overloaded (503) or out of quota (429).
+    GEMINI_TRANSCRIPTION_MODEL: str = os.getenv("GEMINI_TRANSCRIPTION_MODEL", "gemini-3.5-transcribe")
+    GEMINI_TRANSCRIPTION_FALLBACK_MODELS: list = [
+        m.strip()
+        for m in os.getenv("GEMINI_TRANSCRIPTION_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
+        if m.strip()
+    ]
+    GEMINI_ANALYSIS_MODEL: str = os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3.5-flash-lite")
+    # Analysis fallback retains the previous Flash -> Flash Lite failover behavior.
     GEMINI_FALLBACK_MODELS: list = [
-        m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",") if m.strip()
+        m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash").split(",") if m.strip()
     ]
     DATABASE_URL: str = _normalize_db_url(os.getenv("DATABASE_URL", "sqlite:///./data/meetings.db"))
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./data/uploads")
@@ -38,8 +44,20 @@ class Settings:
     }
 
     @property
-    def GEMINI_MODELS(self) -> list:
-        return [self.GEMINI_MODEL] + [m for m in self.GEMINI_FALLBACK_MODELS if m != self.GEMINI_MODEL]
+    def GEMINI_TRANSCRIPTION_MODELS(self) -> list[str]:
+        return self._models_for(self.GEMINI_TRANSCRIPTION_MODEL, self.GEMINI_TRANSCRIPTION_FALLBACK_MODELS)
+
+    @property
+    def GEMINI_ANALYSIS_MODELS(self) -> list[str]:
+        return self._models_for(self.GEMINI_ANALYSIS_MODEL, self.GEMINI_FALLBACK_MODELS)
+
+    @property
+    def GEMINI_MODELS(self) -> list[str]:
+        """Backward-compatible alias for the analysis model candidates."""
+        return self.GEMINI_ANALYSIS_MODELS
+
+    def _models_for(self, primary_model: str, fallback_models: list[str]) -> list[str]:
+        return [primary_model] + [m for m in fallback_models if m != primary_model]
 
     @property
     def ALLOWED_EXTENSIONS(self) -> set:

@@ -60,12 +60,14 @@ class GeminiService:
             config.response_schema = response_schema
 
         last_error: Optional[APIError] = None
-        for model in models or settings.GEMINI_MODELS:
+        candidate_models = models if models is not None else settings.GEMINI_ANALYSIS_MODELS
+        primary_model = candidate_models[0]
+        for model in candidate_models:
             wait_s = delay
             for attempt in range(retries):
                 try:
                     response = self.client.models.generate_content(model=model, contents=contents, config=config)
-                    if model != settings.GEMINI_MODEL:
+                    if model != primary_model:
                         logger.warning("Used fallback model %s.", model)
                     return response, model
                 except APIError as e:
@@ -87,7 +89,7 @@ class GeminiService:
         """Structured generation + Pydantic validation; regenerates once if the JSON is invalid.
         Returns (parsed_result, model_used)."""
         last_error: Optional[Exception] = None
-        models = settings.GEMINI_MODELS
+        models = settings.GEMINI_ANALYSIS_MODELS
         for _ in range(attempts):
             response, model = self._generate(contents, response_schema=schema, temperature=temperature, models=models)
             models = models[models.index(model):]  # regenerate on the model that just answered, not an overloaded one
@@ -134,8 +136,18 @@ class GeminiService:
                 "Transcribe this meeting audio. Accurately detect and separate speakers by their name/role "
                 "(e.g., Manager, Rahul, Priya) based on conversation headers. Output clean dialogue text lines."
             )
-            transcript_response, _ = self._generate([audio_file_remote, transcribe_prompt])
+            transcript_response, _ = self._generate(
+                [audio_file_remote, transcribe_prompt], models=settings.GEMINI_TRANSCRIPTION_MODELS
+            )
             transcript_text = (transcript_response.text or "").strip()
+            if not transcript_text:
+                transcript_text = "\n".join(
+                    part.audio_transcription.text.strip()
+                    for candidate in transcript_response.candidates or []
+                    if candidate.content
+                    for part in candidate.content.parts or []
+                    if part.audio_transcription and part.audio_transcription.text
+                ).strip()
             if not transcript_text:
                 raise ValueError("No speech could be transcribed from this audio.")
 

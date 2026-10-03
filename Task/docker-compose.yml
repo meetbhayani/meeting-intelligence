@@ -5,7 +5,10 @@ services:
       - "8000:8000"
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      GEMINI_TRANSCRIPTION_MODEL: ${GEMINI_TRANSCRIPTION_MODEL:-gemini-3.5-transcribe}
+      GEMINI_TRANSCRIPTION_FALLBACK_MODELS: ${GEMINI_TRANSCRIPTION_FALLBACK_MODELS:-gemini-3.5-flash-lite}
+      GEMINI_ANALYSIS_MODEL: ${GEMINI_ANALYSIS_MODEL:-gemini-3.5-flash-lite}
+      GEMINI_FALLBACK_MODELS: ${GEMINI_FALLBACK_MODELS:-gemini-3.5-flash}
     volumes:
       - meeting-data:/app/data
     restart: unless-stopped

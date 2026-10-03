@@ -55,7 +55,13 @@ app.include_router(api_router)
 
 @app.get("/health", tags=["Ops"])
 def health():
-    return {"status": "ok", "ai_configured": bool(settings.GEMINI_API_KEY), "model": settings.GEMINI_MODEL}
+    return {
+        "status": "ok",
+        "ai_configured": bool(settings.GEMINI_API_KEY),
+        "model": settings.GEMINI_ANALYSIS_MODEL,
+        "transcription_model": settings.GEMINI_TRANSCRIPTION_MODEL,
+        "analysis_model": settings.GEMINI_ANALYSIS_MODEL,
+    }
 
 
 @app.get("/", tags=["Frontend"], include_in_schema=False)
