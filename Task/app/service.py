@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from app.config import settings
 from app.database import SessionLocal
 from app.models import MeetingModel, MeetingStatus
+from app.rag import RAGServiceUnavailable, meeting_rag
 from app.schemas import MeetingAnalysis, QueryAnswer, TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -85,11 +86,11 @@ class GeminiService:
                     wait_s *= 2
         raise last_error
 
-    def _generate_validated(self, contents, schema: type[BaseModel], temperature=0.0, attempts=2):
+    def _generate_validated(self, contents, schema: type[BaseModel], temperature=0.0, attempts=2, models=None):
         """Structured generation + Pydantic validation; regenerates once if the JSON is invalid.
         Returns (parsed_result, model_used)."""
         last_error: Optional[Exception] = None
-        models = settings.GEMINI_ANALYSIS_MODELS
+        models = settings.GEMINI_ANALYSIS_MODELS if models is None else models
         for _ in range(attempts):
             response, model = self._generate(contents, response_schema=schema, temperature=temperature, models=models)
             models = models[models.index(model):]  # regenerate on the model that just answered, not an overloaded one
@@ -203,18 +204,30 @@ class GeminiService:
 
     def answer_meeting_query(self, m: MeetingModel, question: str) -> QueryAnswer:
         """
-        Grounded Natural Language Q&A.
-        Queries the model directly using the complete transcript context stored in the database.
+        Answer using meeting-scoped transcript and analysis chunks retrieved from ChromaDB.
         """
+        retrieved = meeting_rag.retrieve(m.id, question)
+        evidence = "\n\n".join(
+            f"[{item['metadata']['source']} chunk {item['metadata']['chunk_index'] + 1}]\n{item['text']}"
+            for item in retrieved
+        )
         context_payload = (
-            f"You are an expert project assistant. Answer the user query using only the complete "
-            f"meeting transcript details and operational matrices provided below. If the answer "
-            f"cannot be verified by the text facts, state clearly that it was not discussed.\n\n"
-            f"MEETING TRANSCRIPT:\n{m.transcript}\n\n"
-            f"SUMMARY STRUCTURED ANALYTICS:\n{m.analysis_json}\n\n"
+            "You are an expert meeting assistant. Answer only from the retrieved meeting evidence below. "
+            "If the evidence does not verify an answer, say the meeting does not contain enough information "
+            "and set answerable to false. Supporting quotes must be exact excerpts from transcript evidence; "
+            "do not invent or paraphrase quotes. Analysis chunks can guide your answer but are not verbatim "
+            "transcript quotes.\n\n"
+            f"RETRIEVED EVIDENCE:\n{evidence}\n\n"
             f"USER QUESTION: {question}"
         )
-        answer, _ = self._generate_validated(context_payload, QueryAnswer, temperature=0.1)
+        if not retrieved:
+            raise RAGServiceUnavailable(f"No indexed knowledge is available for meeting {m.id}.")
+        answer, _ = self._generate_validated(
+            context_payload,
+            QueryAnswer,
+            temperature=0.1,
+            models=[settings.GEMINI_ANALYSIS_MODEL],
+        )
         return answer
 
     # ------------------------------------------------------------------
@@ -234,10 +247,16 @@ class GeminiService:
             return meeting
 
     def _complete(self, meeting_id: str, analysis: MeetingAnalysis, model: str):
-        self._update(
+        meeting = self._update(
             meeting_id,
             analysis_json=analysis.model_dump_json(),
             title=analysis.title,
+        )
+        if meeting is None:
+            return
+        meeting_rag.index_meeting(meeting)
+        self._update(
+            meeting_id,
             status=MeetingStatus.COMPLETED,
             error_message=None,
             model_name=model,

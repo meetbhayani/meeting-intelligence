@@ -14,14 +14,15 @@ Upload a meeting recording and get a transcript, a summary, decisions, action it
 ## Tech Stack
 
 - **Backend:** FastAPI, SQLAlchemy, Pydantic
-- **AI:** Google Gemini (transcription, structured extraction, Q&A)
+- **AI:** Gemini (transcription, structured extraction and Q&A) + Cohere Embed v4.0
+- **Retrieval:** ChromaDB vector search, rebuilt from completed database records at startup
 - **Database:** SQLite (local) / PostgreSQL (production)
 - **Frontend:** HTML + Tailwind CSS
 - **Deployment:** Docker, Render
 
 ## Getting Started
 
-**Prerequisites:** Python 3.11+ and a [Gemini API key](https://aistudio.google.com/apikey).
+**Prerequisites:** Python 3.11+, a [Gemini API key](https://aistudio.google.com/apikey), and a Cohere API key.
 
 ```bash
 cd Task
@@ -29,7 +30,7 @@ python -m venv .venv
 .venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env            # add your GEMINI_API_KEY
+cp .env.example .env            # add your GEMINI_API_KEY and COHERE_API_KEY
 python run.py
 ```
 
@@ -51,6 +52,13 @@ GEMINI_API_KEY=your-key docker compose up --build
 | `GEMINI_TRANSCRIPTION_FALLBACK_MODELS` | Models tried if transcription is overloaded | `gemini-3.5-flash-lite` |
 | `GEMINI_ANALYSIS_MODEL` | Model used for meeting analysis and current Q&A | `gemini-3.5-flash-lite` |
 | `GEMINI_FALLBACK_MODELS` | Analysis fallback if the selected model is overloaded | `gemini-3.5-flash` |
+| `COHERE_API_KEY` | Required for meeting embeddings and RAG retrieval | – |
+| `COHERE_EMBEDDING_MODEL` | Cohere embedding model | `embed-v4.0` |
+| `COHERE_EMBEDDING_DIMENSION` | Embedding vector dimension | `1024` |
+| `CHROMA_PERSIST_DIRECTORY` | Local ChromaDB persistence directory | `./data/chroma_db` |
+| `RAG_CHUNK_SIZE` | Maximum chunk size in characters | `3500` |
+| `RAG_CHUNK_OVERLAP` | Text overlap between chunks, in characters | `400` |
+| `RAG_RETRIEVAL_COUNT` | Maximum evidence chunks retrieved per question | `6` |
 | `DATABASE_URL` | Database connection string | `sqlite:///./data/meetings.db` |
 | `MAX_UPLOAD_MB` | Max audio file size | `100` |
 
@@ -86,7 +94,7 @@ curl -X POST http://127.0.0.1:8000/api/meetings/{id}/query \
 2. In Render, choose **New → Blueprint** and select the repo (it uses `render.yaml`).
 3. Enter your `GEMINI_API_KEY` when prompted and click **Apply**.
 
-Render creates the web service and a PostgreSQL database automatically.
+Render creates the web service and a PostgreSQL database automatically. Add `COHERE_API_KEY` when prompted. The free service filesystem is ephemeral, so ChromaDB is rebuilt from completed meetings in PostgreSQL on startup; rebuilds re-embed stored content with Cohere.
 
 ## Project Structure
 

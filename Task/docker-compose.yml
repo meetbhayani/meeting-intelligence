@@ -9,6 +9,9 @@ services:
       GEMINI_TRANSCRIPTION_FALLBACK_MODELS: ${GEMINI_TRANSCRIPTION_FALLBACK_MODELS:-gemini-3.5-flash-lite}
       GEMINI_ANALYSIS_MODEL: ${GEMINI_ANALYSIS_MODEL:-gemini-3.5-flash-lite}
       GEMINI_FALLBACK_MODELS: ${GEMINI_FALLBACK_MODELS:-gemini-3.5-flash}
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      COHERE_EMBEDDING_MODEL: ${COHERE_EMBEDDING_MODEL:-embed-v4.0}
+      CHROMA_PERSIST_DIRECTORY: /app/data/chroma_db
     volumes:
       - meeting-data:/app/data
     restart: unless-stopped

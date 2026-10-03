@@ -10,6 +10,7 @@ from app.api.endpoints import router as api_router
 from app.config import settings
 from app.database import SessionLocal, init_db
 from app.models import MeetingModel, MeetingStatus
+from app.rag import RAGServiceUnavailable, meeting_rag
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -30,6 +31,16 @@ async def lifespan(_: FastAPI):
         db.commit()
         if count:
             logger.warning("Marked %d interrupted meeting(s) as failed.", count)
+        completed = db.query(MeetingModel).filter(MeetingModel.status == MeetingStatus.COMPLETED).all()
+        if completed:
+            try:
+                meeting_rag.rebuild(completed)
+            except RAGServiceUnavailable:
+                logger.exception("RAG startup re-indexing failed; meeting Q&A will be unavailable.")
+        elif settings.COHERE_API_KEY:
+            meeting_rag.rebuild([])
+    if not settings.COHERE_API_KEY:
+        logger.warning("COHERE_API_KEY is not set: RAG indexing and meeting Q&A will return 503.")
     if not settings.GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY is not set: uploads and queries will return 503.")
     yield
@@ -61,6 +72,9 @@ def health():
         "model": settings.GEMINI_ANALYSIS_MODEL,
         "transcription_model": settings.GEMINI_TRANSCRIPTION_MODEL,
         "analysis_model": settings.GEMINI_ANALYSIS_MODEL,
+        "rag_configured": bool(settings.COHERE_API_KEY),
+        "rag_index_ready": meeting_rag.ready,
+        "embedding_model": settings.COHERE_EMBEDDING_MODEL,
     }
 
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import MeetingModel, MeetingStatus
+from app.rag import RAGServiceUnavailable, meeting_rag
 from app.schemas import (
     AudioMetadata,
     MeetingAnalysis,
@@ -65,6 +66,8 @@ def _audio_duration(path: str) -> Optional[float]:
 def _ensure_ai_configured():
     if not settings.GEMINI_API_KEY:
         raise HTTPException(status_code=503, detail="AI service is not configured (GEMINI_API_KEY missing).")
+    if not settings.COHERE_API_KEY:
+        raise HTTPException(status_code=503, detail="RAG service is not configured (COHERE_API_KEY missing).")
 
 
 def _get_meeting_or_404(db: Session, meeting_id: str) -> MeetingModel:
@@ -229,6 +232,9 @@ def query_meeting(id: str, payload: QueryRequest, db: Session = Depends(get_db))
         result = gemini_service.answer_meeting_query(m, payload.question)
     except AIServiceUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except RAGServiceUnavailable as e:
+        logger.exception("RAG query failed")
+        raise HTTPException(status_code=503, detail=str(e))
     except APIError as e:
         logger.exception("Gemini query failed")
         if e.code == 429:
@@ -262,4 +268,8 @@ def delete_meeting(id: str, db: Session = Depends(get_db)):
         db.rollback()
         logger.exception("Delete failed for %s", id)
         raise HTTPException(status_code=500, detail="Could not delete the meeting. Please try again.")
+    try:
+        meeting_rag.delete_meeting(id)
+    except Exception:
+        logger.exception("Could not remove ChromaDB vectors for deleted meeting %s.", id)
     return {"message": f"Meeting {id} deleted."}

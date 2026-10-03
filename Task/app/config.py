@@ -26,6 +26,14 @@ class Settings:
     GEMINI_FALLBACK_MODELS: list = [
         m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash").split(",") if m.strip()
     ]
+    COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
+    COHERE_EMBEDDING_MODEL: str = os.getenv("COHERE_EMBEDDING_MODEL", "embed-v4.0")
+    COHERE_EMBEDDING_DIMENSION: int = int(os.getenv("COHERE_EMBEDDING_DIMENSION", "1024"))
+    CHROMA_PERSIST_DIRECTORY: str = os.getenv("CHROMA_PERSIST_DIRECTORY", "./data/chroma_db")
+    CHROMA_COLLECTION_NAME: str = os.getenv("CHROMA_COLLECTION_NAME", "meeting_knowledge")
+    RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "3500"))
+    RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "400"))
+    RAG_RETRIEVAL_COUNT: int = int(os.getenv("RAG_RETRIEVAL_COUNT", "6"))
     DATABASE_URL: str = _normalize_db_url(os.getenv("DATABASE_URL", "sqlite:///./data/meetings.db"))
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./data/uploads")
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "100"))
